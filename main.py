@@ -1,9 +1,14 @@
 import discord
 import os
 import random
+import logging as log
+
+from reaction_timeout import ReactionTimeout
 
 from dotenv import load_dotenv
 from datetime import timedelta
+from discord.ext import tasks, commands
+from discord import Forbidden
 
 load_dotenv()
 key = os.environ["TOKEN"]
@@ -12,14 +17,12 @@ CHANNEL_ID_GENERAL = 970095404031033374
 CHANNEL_ID_UNSIGN = 1118182973037092884
 CHANNEL_ID_SIGNIN = 982296021746978856
 
-LOW = 18
+LOW = 19
 HIGH = 25
 
 MAX_OFFENSES = 3
 OFFENSES_TIMEOUT = 60
 PRISON_TIMEOUT = 120
-
-watcher = {}
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -27,11 +30,15 @@ intents.reactions = True
 intents.moderation = True
 
 client = discord.Client(intents=intents)
+watcher = {}
+
+FORMAT = "[%(asctime)s] (%(levelname)s): %(message)s"
+log.basicConfig(level=log.INFO, format=FORMAT, datefmt="%m/%d/%Y %I:%M:%S %p")
 
 
 @client.event
 async def on_ready():
-    print(f"We have logged in as {client.user}")
+    log.info(f"We have logged in as {client.user}")
 
 
 @client.event
@@ -53,8 +60,6 @@ async def on_raw_reaction_remove(data):
     if ctxChannel.id != CHANNEL_ID_SIGNIN:
         return
 
-    print("Someone just removed reaction")
-
     raid = "SADPEPE"
     message = await ctxChannel.fetch_message(data.message_id)
     if "Thursday" in message.content:
@@ -67,6 +72,7 @@ async def on_raw_reaction_remove(data):
     member = await message.guild.query_members(user_ids=[data.user_id])
     member = member[0] or None
     if member != None:
+        log.info(f"{member.display_name} just removed reaction for {raid}")
         await tarChannel.send(
             "<:pepeexit:1110961845986148492> **"
             + member.display_name
@@ -75,6 +81,7 @@ async def on_raw_reaction_remove(data):
             + "'s raid... RIP"
         )
     else:
+        log.info(f"Someone just removed reaction for {raid}")
         await tarChannel.send(
             "Someone unsigned from " + raid + "'s raid, sadly i don't remember who..."
         )
@@ -84,7 +91,7 @@ async def on_raw_reaction_remove(data):
         if ban:
             return
         else:
-            await motivation_check(data, False, raid)
+            await motivation_check(data, False, raid, member)
 
 
 @client.event
@@ -97,8 +104,6 @@ async def on_raw_reaction_add(data):
     if ctxChannel.id != CHANNEL_ID_SIGNIN:
         return
 
-    print("Someone just added reaction")
-
     raid = "SADPEPE"
     message = await ctxChannel.fetch_message(data.message_id)
     if "Thursday" in message.content:
@@ -111,10 +116,12 @@ async def on_raw_reaction_add(data):
     member = await message.guild.query_members(user_ids=[data.user_id])
     member = member[0] or None
     if member != None:
+        log.info(f"{member.display_name} just added reaction for {raid}")
         await tarChannel.send(
             "**" + member.display_name + "** signed up for " + raid + "'s raid!"
         )
     else:
+        log.info(f"Someone just added reaction for {raid}")
         await tarChannel.send(
             "Someone signed up for " + raid + "'s raid, sadly i don't know who..."
         )
@@ -124,30 +131,42 @@ async def on_raw_reaction_add(data):
         if ban:
             return
         else:
-            await motivation_check(data, True, raid)
+            await motivation_check(data, True, raid, member)
+
+
+def remove_reactionTimeout(member_id):
+    log.info(f"user {member_id} reaction watcher refreshed")
+    watcher.pop(member_id)
 
 
 async def police_check(member):
-    if member.id in watcher:
-        if watcher[member.id] >= MAX_OFFENSES:
-            await send_to_prison(member)
-        else:
-            watcher[member.id] += 1
+    if member.id not in watcher:
+        watcher[member.id] = ReactionTimeout(client, member.id, remove_reactionTimeout)
     else:
-        watcher[member.id] = 1
-    return member.id in watcher
+        watcher[member.id].increment()
+        if watcher[member.id].count >= MAX_OFFENSES:
+            log.info(f"user {member.id} sent to prison")
+            try:
+                await send_to_prison(member)
+            except Forbidden as e:
+                if e.code == 50013:
+                    log.warning(f"insufficient permissions to timeout user {member.id}")
+            finally:
+                watcher[member.id].stop_watching()
+                watcher.pop(member.id)
+
+    return member.id not in watcher
 
 
 async def send_to_prison(member):
-    watcher.pop(member.id)
-
     if member != None:
+        log.info(f"user {member.display_name} sent to prison")
         await member.timeout(
             timedelta(seconds=PRISON_TIMEOUT),
             reason="Please do not spam the raid signup reactions!",
         )
         # if member.timed_out_until != None:
-        await discord.utils.get(member.guild.channels, id=CHANNEL_ID_GENERAL).send(
+        await discord.utils.get(member.guild.channels, id=CHANNEL_ID_UNSIGN).send(
             "Busted! I have just sent **"
             + member.display_name
             + "** to prison for **"
@@ -155,14 +174,12 @@ async def send_to_prison(member):
             + " seconds**, for disrupting the peace in the #sign-in-raids channel! Trolls beware."
         )
 
-    print(str(member.display_name) + " sent to prison")
-    # announce on general, warning + tag, timeout
-
 
 async def motivation_check(
     reaction_data,
     reaction_type: bool,
     reaction_raid: str,
+    member,
     channel_id: int = CHANNEL_ID_GENERAL,
 ):
     """Checks if the number of signsup has changed to match the LOW or HIGH env variables,
@@ -172,15 +189,15 @@ async def motivation_check(
     answers_signup = {
         "low": [
             "Here we go! {_amount} signups already for **{_raid}**'s raid! Keep 'em coming!",
-            "Oh yeah, {_amount} signups for **{_raid}**'s raid! 10 more to go",
+            "Oh yeah, {_amount} signups for **{_raid}**'s raid! Need more to go",
             "Great news! We've reached {_amount} signups for **{_raid}**! The raid is filling up fast!",
             "We're halfway there! {_amount} brave souls have signed up for **{_raid}**'s raid!",
-            "Fifteen warriors have joined the cause! **{_raid}**'s raid is gaining momentum!",
+            "{_amount} warriors have joined the cause! **{_raid}**'s raid is gaining momentum!",
             "Fantastic! We've hit the {_amount} signups mark for **{_raid}**'s raid!",
             "A round of applause for the {_amount} warriors ready to conquer **{_raid}**!",
             "It's a solid start! We've got {_amount} signups for **{_raid}**'s raid!",
             "We've reached {_amount} signups! **{_raid}**'s raid is shaping up nicely!",
-            "{_amount} brave adventurers have answered the call for **{_raid}**'s raid!",
+            "So far,{_amount} brave adventurers have answered the call for **{_raid}**'s raid!",
         ],
         "high": [
             "Ladies and gentlemen, we have ourselves a raid on **{_raid}**! {_amount} people ready to parse!",
@@ -238,7 +255,9 @@ async def motivation_check(
         await client.get_channel(channel_id).send(
             answers_unsign[sizes[reaction.count + 1]][
                 random.randint(0, len(answers_unsign[sizes[reaction.count + 1]]) - 1)
-            ].format(_amount=reaction.count, _raid=reaction_raid)
+            ].format(
+                _amount=reaction.count, _raid=reaction_raid, _user=member.display_name
+            )
         )
 
 
