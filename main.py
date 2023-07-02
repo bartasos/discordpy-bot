@@ -18,8 +18,8 @@ key = os.environ["TOKEN"]
 
 _guild_test = discord.Object(id=1122548133717618808)
 
-LOW = 1
-HIGH = 2
+LOW = 15
+HIGH = 25
 
 MAX_OFFENSES = 4
 OFFENSES_TIMEOUT = 60
