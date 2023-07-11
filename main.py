@@ -21,7 +21,7 @@ _guild_test = discord.Object(id=1122548133717618808)
 LOW = 15
 HIGH = 25
 
-MAX_OFFENSES = 4
+MAX_OFFENSES = 5
 OFFENSES_TIMEOUT = 60
 PRISON_TIMEOUT = 120
 
@@ -58,6 +58,22 @@ async def status(interaction):
     await interaction.response.send_message(
         "I am alive and well! \n" + result, ephemeral=True
     )
+
+
+@tree.command(
+    name="set_max_offenses",
+    description="Specify how many reactions can a user make before being timed-out for bot abuse",
+    # guild=_guild_test,
+)
+@app_commands.describe(max_offenses="Max reactions before user is timed out")
+async def set_max_offenses(interaction, max_offenses: int):
+    global MAX_OFFENSES
+    MAX_OFFENSES = max_offenses
+
+    await interaction.response.send_message(
+        f"New number for MAX_OFFENSES = {MAX_OFFENSES}", ephemeral=True
+    )
+    log.info(f"changed MAX_OFFENSES = {MAX_OFFENSES}")
 
 
 @tree.command(
@@ -285,7 +301,7 @@ async def police_check(member):
         watcher[member.id] = ReactionTimeout(client, member.id, remove_reactionTimeout)
     else:
         watcher[member.id].increment()
-        if watcher[member.id].count >= MAX_OFFENSES:
+        if watcher[member.id].count > MAX_OFFENSES:
             try:
                 await send_to_prison(member)
             except Forbidden as e:
@@ -311,7 +327,7 @@ async def send_to_prison(member):
         cursor.execute(
             f"SELECT channel_id FROM channels WHERE channel_type = 2 AND guild_id = {member.guild.id}"
         )
-        channel_id_report = cursor.fetchall()
+        channel_id_report = cursor.fetchone()[0]
 
         # if member.timed_out_until != None:
         await discord.utils.get(member.guild.channels, id=channel_id_report).send(
