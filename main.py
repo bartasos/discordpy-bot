@@ -55,6 +55,8 @@ async def status(interaction):
     for row in cursor.fetchall():
         result += str(row) + "\n"
 
+    result += f"\nMAX_OFFENSES = {MAX_OFFENSES}\n"
+
     await interaction.response.send_message(
         "I am alive and well! \n" + result, ephemeral=True
     )
