@@ -10,7 +10,7 @@ from dotenv import load_dotenv, set_key
 from datetime import timedelta
 from discord import Forbidden, app_commands
 
-conn = sqlite3.connect("database.db")
+conn = sqlite3.connect("sqlite3/data/database.db")
 cursor = conn.cursor()
 
 load_dotenv(override=True)

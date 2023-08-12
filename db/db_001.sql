@@ -13,6 +13,4 @@ CREATE TABLE IF NOT EXISTS channels(
     CONSTRAINT fk_channels_channel_type 
         FOREIGN KEY(channel_type) 
         REFERENCES channels_types(id)
-    CONSTRAINT uq_channels_guild_channel
-        UNIQUE(guild_id, channel_type)
 );
