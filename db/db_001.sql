@@ -14,3 +14,7 @@ CREATE TABLE IF NOT EXISTS channels(
         FOREIGN KEY(channel_type) 
         REFERENCES channels_types(id)
 );
+
+INSERT INTO channels_types(name) VALUES('announce');
+INSERT INTO channels_types(name) VALUES('report');
+INSERT INTO channels_types(name) VALUES('observe');

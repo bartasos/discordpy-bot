@@ -10,13 +10,13 @@ from dotenv import load_dotenv, set_key
 from datetime import timedelta
 from discord import Forbidden, app_commands
 
-conn = sqlite3.connect("sqlite3/data/database.db")
+conn = sqlite3.connect(database="/data/database.db")
 cursor = conn.cursor()
 
 load_dotenv(override=True)
 key = os.environ["TOKEN"]
 
-_guild_test = discord.Object(id=1122548133717618808)
+_guild_test = discord.Object(id=970089709265096754)
 
 LOW = 15
 HIGH = 25
@@ -90,7 +90,11 @@ async def set_channel_announce(interaction, channel: discord.TextChannel):
     )
 
     cursor.execute(
-        "REPLACE INTO channels (guild_id, guild_name, channel_type, channel_id, channel_name) VALUES (?,?,?,?,?);",
+        "DELETE FROM channels WHERE channel_type=? and guild_id=?;",
+        (1, interaction.guild_id),
+    )
+    cursor.execute(
+        "INSERT INTO channels (guild_id, guild_name, channel_type, channel_id, channel_name) VALUES (?,?,?,?,?);",
         (interaction.guild_id, interaction.guild.name, 1, channel.id, channel.name),
     )
     conn.commit()
@@ -99,7 +103,9 @@ async def set_channel_announce(interaction, channel: discord.TextChannel):
         f"New channel for announcements: <#{channel.id}>", ephemeral=True
     )
 
-    log.info(f"New channel for announcements: {channel.name}")
+    log.info(
+        f"New channel for announcements: {channel.name} in server: {interaction.guild.name}"
+    )
 
 
 @tree.command(
@@ -112,7 +118,12 @@ async def set_channel_report(interaction, channel: discord.TextChannel):
     log.info(f"{interaction.user.display_name} used the 'Set Channel Report' command.")
 
     cursor.execute(
-        "REPLACE INTO channels (guild_id, guild_name, channel_type, channel_id, channel_name) VALUES (?,?,?,?,?);",
+        "DELETE FROM channels WHERE channel_type=? and guild_id=?;",
+        (2, interaction.guild_id),
+    )
+
+    cursor.execute(
+        "INSERT INTO channels (guild_id, guild_name, channel_type, channel_id, channel_name) VALUES (?,?,?,?,?);",
         (interaction.guild_id, interaction.guild.name, 2, channel.id, channel.name),
     )
     conn.commit()
@@ -121,20 +132,22 @@ async def set_channel_report(interaction, channel: discord.TextChannel):
         f"New channel for reporting sign-in activity: <#{channel.id}>", ephemeral=True
     )
 
-    log.info(f"New channel for reports: {channel.name}")
+    log.info(
+        f"New channel for reports: {channel.name} in server: {interaction.guild.name}"
+    )
 
 
 @tree.command(
-    name="set_channel_observe",
-    description="Specify Channel, where the bot listen for reactions",
+    name="add_channel_observe",
+    description="Add a channel to the list of channels where the bot listens for reactions",
     # guild=_guild_test,
 )
 @app_commands.describe(channel="Channel to listen in")
-async def set_channel_report(interaction, channel: discord.TextChannel):
-    log.info(f"{interaction.user.display_name} used the 'Set Channel Observe' command.")
+async def add_channel_report(interaction, channel: discord.TextChannel):
+    log.info(f"{interaction.user.display_name} used the 'Add Channel Observe' command.")
 
     cursor.execute(
-        "REPLACE INTO channels (guild_id, guild_name, channel_type, channel_id, channel_name) VALUES (?,?,?,?,?);",
+        "INSERT INTO channels (guild_id, guild_name, channel_type, channel_id, channel_name) VALUES (?,?,?,?,?);",
         (interaction.guild_id, interaction.guild.name, 3, channel.id, channel.name),
     )
     conn.commit()
@@ -143,7 +156,36 @@ async def set_channel_report(interaction, channel: discord.TextChannel):
         f"New channel to listen for sign-in activity: <#{channel.id}>", ephemeral=True
     )
 
-    log.info(f"New channel for observing: {channel.name}")
+    log.info(
+        f"Added new channel for observing: {channel.name} in server: {interaction.guild.name}"
+    )
+
+
+@tree.command(
+    name="remove_channel_observe",
+    description="Remove channel from the list of channels where the bot listens for reactions (if listening)",
+    # guild=_guild_test,
+)
+@app_commands.describe(channel="Channel where listening")
+async def remove_channel_report(interaction, channel: discord.TextChannel):
+    log.info(
+        f"{interaction.user.display_name} used the 'Remove Channel Observe' command."
+    )
+
+    cursor.execute(
+        "DELETE FROM channels WHERE guild_id=? and channel_type=? and channel_id=?;",
+        (interaction.guild_id, 3, channel.id),
+    )
+    conn.commit()
+
+    await interaction.response.send_message(
+        f"Channel: <#{channel.id}> no longer used for listening for sign-in activity!",
+        ephemeral=True,
+    )
+
+    log.info(
+        f"Removed channel for observing: {channel.name} in server: {interaction.guild.name}"
+    )
 
 
 @client.event
@@ -166,16 +208,16 @@ async def on_raw_reaction_remove(data):
             """
         ).fetchone()[0],
     )
-    CHANNEL_OBSERVE_ID = cursor.execute(
+    observe_channels = cursor.execute(
         f"""
                 SELECT channel_id
                 FROM channels
                 WHERE channel_type = 3 AND guild_id = {guild.id}
             """
-    ).fetchone()[0]
+    ).fetchall()
 
     # we only want to watch the sign-in-raids channel
-    if ctxChannel.id != CHANNEL_OBSERVE_ID:
+    if (ctxChannel.id,) not in observe_channels:
         return
 
     message = await ctxChannel.fetch_message(data.message_id)
@@ -228,16 +270,16 @@ async def on_raw_reaction_add(data):
             """
         ).fetchone()[0],
     )
-    CHANNEL_OBSERVE_ID = cursor.execute(
+    observe_channels = cursor.execute(
         f"""\
                 SELECT channel_id
                 FROM channels
                 WHERE channel_type = 3 AND guild_id = {guild.id}
             """
-    ).fetchone()[0]
+    ).fetchall()
 
     # we only want to watch the sign-in-raids channel
-    if ctxChannel.id != CHANNEL_OBSERVE_ID:
+    if (ctxChannel.id,) not in observe_channels:
         return
 
     message = await ctxChannel.fetch_message(data.message_id)
